@@ -97,7 +97,7 @@ $$MTF \propto e^{T_{wait}/\tau}$$
 **Scenario:** An unbuffered wire has a delay of 20ns. We cut it into 4 equal segments using ideal repeaters.
 * **Logic:** Delay $\propto L^2$. If length is divided by $m$, segment delay is $1/m^2$ of original. Total delay is $m \times (1/m^2) = 1/m$.
 * **Calculation:** $20\text{ns} / 4 = \mathbf{5\text{ns}}$.
-* *(If repeaters had 0.5ns delay each: $5 + (4 \times 0.5) = 7\text{ns}$)*.
+* *If repeaters had 0.5ns delay each: $5 + (4 \times 0.5) = 7\text{ns}$ *.
 
 ### **Q2: MTBF Improvement**
 **Scenario:** Synchronizer $\tau = 150\text{ps}$. Waiting time increases from 2ns to 4ns.
