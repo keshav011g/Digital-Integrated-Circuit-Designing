@@ -1,69 +1,161 @@
-# 🚀 High-Performance ML Hardware Accelerator (ARM Compatible)
+# ⚡ Digital Integrated Circuits: Interconnects, Timing & Signal Integrity
 
-> **A dedicated hardware IP core designed to offload heavy Matrix-Multiply-Accumulate (MAC) operations from ARM processors for efficient Edge AI inference.**
+> **Reference Material:** Rabaey *Digital Integrated Circuits* (Chapters 9 & 10) & High-Speed Interconnects Lecture Slides.  
+> **Topic:** VLSI Design, Timing Analysis, Clock Distribution, and Asynchronous Logic.
 
-## 📖 Overview
+---
 
-This repository contains the complete **Register Transfer Level (RTL)** implementation of a custom Digital AI Accelerator. It is architected to bridge the gap between low-power embedded CPUs (like the ARM Cortex-M series) and the high compute demands of modern Deep Learning models.
+## 📖 Table of Contents
+1. [The Interconnect Challenge](#1-the-interconnect-challenge)
+2. [Timing Fundamentals](#2-timing-fundamentals-skew--jitter)
+3. [Formula Cheat Sheet](#3-formula-cheat-sheet)
+4. [Solved Calculation Problems](#4-solved-calculation-problems)
+5. [Case Study: DEC Alpha Processors](#5-case-study-dec-alpha-processors)
+6. [Advanced Topic: Asynchronous Design](#6-advanced-topic-asynchronous-design)
+7. [Signal Integrity & Power](#7-signal-integrity--power-delivery)
 
-By offloading the computationally expensive matrix math to this dedicated hardware, systems can achieve **100x-1000x efficiency gains** compared to software-based execution.
+---
 
-## ✨ Key Features
+## 1. The Interconnect Challenge
 
-* **16x16 Systolic Array Core:** Massively parallel execution engine capable of performing **256 MAC operations per clock cycle**.
-* **Weight-Stationary Dataflow:** Optimized architecture that minimizes energy-expensive memory accesses by reusing weights within the Processing Elements (PEs).
-* **Hardware Tiling Engine:** Automatically breaks down large matrices (e.g., 100x100) to fit onto the 16x16 physical core without software intervention.
-* **Automatic Zero Padding:** Hardware logic handles "ragged edges" (matrix sizes not divisible by 16) transparently.
-* **DMA-Enabled:** Integrated Direct Memory Access (DMA) controller to fetch weights and inputs autonomously, preventing CPU starvation.
-* **ARM-Ready Interface:** Standard AXI-Lite register map for seamless integration with AMBA-based SoCs.
+**The Problem:** As technology scales, transistors get faster and smaller, but interconnects (wires) get thinner and more resistive. Interconnect delay is now the primary bottleneck in high-speed design.
 
-## 🏗️ System Architecture
+### 🛑 Parasitic Effects
+Interconnects are no longer ideal. They are modeled with **R, C, and L**.
 
-The system is designed as a modular co-processor.
+#### **Capacitance ($C$)**
+* **Components:** Parallel plate (area), Fringing fields (thickness), Inter-wire (spacing).
+* **Crosstalk:** Coupling between adjacent lines.
+    * *Driven Lines:* Causes glitches.
+    * *Floating Lines:* Causes charge sharing/voltage shifts.
+* **Miller Effect:** If adjacent wires switch in *opposite* directions simultaneously, the effective coupling capacitance doubles ($2C_c$), drastically increasing delay.
 
-### 1. The Host Ecosystem
-* **CPU (ARM Cortex):** Acts as the orchestrator. It parses the neural network layers, sets up the memory pointers, and issues the "Start" command.
-* **External RAM (DDR):** Holds the heavy model weights and input buffers (images/audio).
+#### **Resistance ($R$)**
+* **IR Drop:** Voltage drops across power rails reduce switching speed and noise margins.
+* **RC Delay:** Delay grows quadratically with wire length ($Delay \propto L^2$).
+    * *Solution:* **Repeater Insertion** breaks wires into segments, making delay linear ($Delay \propto L$).
+* **Electromigration:** Reliability failure where high current density physically moves metal atoms, causing voids (opens) or hillocks (shorts).
 
-### 2. The Accelerator IP
-* **Control Unit (AXI-Lite):** A memory-mapped slave interface. The CPU communicates with the chip by writing to specific memory addresses (e.g., `0x4000_0000`).
-* **DMA Controller (AXI-Master):** A bus master that bursts large blocks of data from external RAM into the chip's internal SRAM buffers.
-* **Internal SRAM Buffers:**
-  * **Weight Buffer (32KB):** Caches model parameters.
-  * **Input Buffer (16KB):** Caches incoming feature maps.
-  * **Accumulator Buffer (16KB):** Stores partial sums before final write-back.
-* **Systolic Core:** The 16x16 grid of Processing Elements that performs the actual INT8 math.
+#### **Inductance ($L$)**
+* **Ground Bounce ($L \cdot di/dt$):** Rapid current surges through package inductance cause voltage spikes on internal supply rails.
+* **Transmission Lines:** When wire length $l > \lambda/10$, lumped RC models fail. Distributed RLC models must be used.
 
-## ⚙️ Technical Specifications
+---
 
-| Feature | Specification |
-| :--- | :--- |
-| **Precision** | INT8 (8-bit Integer) Inputs / INT24 Accumulation |
-| **Core Size** | 16x16 Grid (256 Processing Elements) |
-| **Throughput** | 256 Operations / Cycle |
-| **Memory Interface** | AXI4-Master (128-bit Data Width) |
-| **Control Interface** | AXI4-Lite (32-bit Data Width) |
-| **On-Chip Memory** | ~64 KB (Configurable SRAM Macros) |
-| **Target Frequency** | 200 MHz+ (on 28nm ASIC) / 100 MHz (on Artix-7 FPGA) |
+## 2. Timing Fundamentals: Skew & Jitter
 
-## 🛠️ Hardware Integration (Register Map)
+Correct operation relies on the strict ordering of events via a global clock.
 
-To control the accelerator from C/C++ code, use the following register offsets from the base address:
+| Parameter | Definition | Impact |
+| :--- | :--- | :--- |
+| **Clock Skew ($\delta$)** | **Spatial** variation. Difference in arrival time of the clock edge at different physical locations. | **Positive Skew:** Improves speed, risks race conditions.<br>**Negative Skew:** Reduces speed, prevents race conditions. |
+| **Clock Jitter ($t_{jitter}$)** | **Temporal** variation. Cycle-to-cycle uncertainty of the clock period at a single point. | Always hurts performance. Reduces valid timing window. |
 
-| Offset | Register Name | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `0x00` | **REG_CONTROL** | Write | Write `0x1` to START the engine. |
-| `0x04` | **REG_STATUS** | Read | `Bit 0`: Busy, `Bit 1`: Done. |
-| `0x08` | **REG_M_SIZE** | R/W | Number of rows in the Input Matrix. |
-| `0x0C` | **REG_K_SIZE** | R/W | Shared dimension (Input Cols / Weight Rows). |
-| `0x10` | **REG_N_SIZE** | R/W | Number of columns in the Weight Matrix. |
+### Clock Distribution Architectures
+1.  **H-Tree:** Fractal structure ensuring equal path lengths to all leaves. Theoretically zero skew, but hard to implement in irregular layouts.
+2.  **Grid:** Mesh structure (e.g., Alpha 21164). Minimizes local skew variability but has extremely high capacitance and power consumption.
+3.  **Active Deskewing:** Using PLLs or DLLs to align local clocks with a global reference.
 
-**Example Driver Code:**
-```c
-void run_inference(int rows, int cols, int depth) {
-    *REG_M_SIZE = rows;
-    *REG_N_SIZE = cols;
-    *REG_K_SIZE = depth;
-    *REG_CONTROL = 1; // Start
-    while(!(*REG_STATUS & 0x02)); // Wait for Done
-}
+---
+
+## 3. Formula Cheat Sheet
+
+### Variable Legend
+* $T$: Clock Period
+* $t_{c-q}$: Max register propagation delay
+* $t_{c-q, cd}$: Min register contamination delay
+* $t_{logic}$: Max logic delay
+* $t_{su} / t_{hold}$: Setup / Hold time
+* $\delta$: Skew ($t_{dest} - t_{src}$)
+
+### ⚡ Max Speed Constraint (Setup Time)
+*Determines the minimum clock period.*
+
+$$T \ge t_{c-q} + t_{logic} + t_{su} - \delta + 2t_{jitter}$$
+
+> **Insight:** Positive skew helps speed. Jitter always hurts.
+
+### 🏁 Race Condition Constraint (Hold Time)
+*Determines functional failure. Independent of clock speed.*
+
+$$\delta < t_{c-q, cd} + t_{logic, cd} - t_{hold} - 2t_{jitter}$$
+
+> **Insight:** Positive skew causes race conditions.
+
+### 🔄 Synchronizer Reliability (MTBF)
+*Mean Time Between Failures for crossing clock domains.*
+
+$$MTF \propto e^{T_{wait}/\tau}$$
+
+> **Insight:** Waiting longer exponentially increases reliability.
+
+---
+
+## 4. Solved Calculation Problems
+
+### **Q1: Elmore Delay & Repeaters**
+**Scenario:** An unbuffered wire has a delay of 20ns. We cut it into 4 equal segments using ideal repeaters.
+* **Logic:** Delay $\propto L^2$. If length is divided by $m$, segment delay is $1/m^2$ of original. Total delay is $m \times (1/m^2) = 1/m$.
+* **Calculation:** $20\text{ns} / 4 = \mathbf{5\text{ns}}$.
+* *If repeaters had 0.5ns delay each: $5 + (4 \times 0.5) = 7\text{ns}$ *.
+
+### **Q2: MTBF Improvement**
+**Scenario:** Synchronizer $\tau = 150\text{ps}$. Waiting time increases from 2ns to 4ns.
+* **Logic:** Improvement = $e^{\Delta T / \tau}$.
+* **Calculation:** $\Delta T = 2\text{ns}$. $\text{Exponent} = 2 / 0.15 \approx 13.33$.
+* **Result:** $e^{13.33} \approx \mathbf{615,000\times}$ improvement.
+
+### **Q3: Power Supply Noise**
+**Scenario:** Current surge $10\text{A}$ in $1\text{ns}$. Inductance $0.5\text{nH}$.
+* **Logic:** $V = L \cdot (di/dt)$.
+* **Calculation:** $0.5 \times 10^{-9} \cdot (10 / 10^{-9}) = \mathbf{5\text{V}}$.
+* **Impact:** Catastrophic failure (likely exceeds supply voltage).
+
+---
+
+## 5. Case Study: DEC Alpha Processors
+
+Evolution of high-performance clocking to handle power constraints.
+
+| Feature | **Alpha 21164 (EV5)** | **Alpha 21264 (EV6)** |
+| :--- | :--- | :--- |
+| **Topology** | **Single Global Grid** | **Hierarchical (Windowpanes)** |
+| **Strategy** | Brute force. Massive metal grid to equalize absolute delay. | Distributed. Global clock feeds local grids. |
+| **Driver** | Centralized huge buffer (58cm effective width). | Distributed drivers from 4 sides. |
+| **Power** | **High (20W).** 40% of total chip power. | **Optimized.** Allows **Clock Gating**. |
+| **Trade-off** | Simple skew management vs. High Power. | Power efficient vs. Complex skew management. |
+
+---
+
+## 6. Advanced Topic: Asynchronous Design
+
+**Concept:** Removing the global clock. Blocks communicate via **Handshaking**.
+
+### Handshaking Protocols
+1.  **2-Phase (Transition Signaling):** Events signaled by any toggle ($0 \to 1$ or $1 \to 0$). Fast, but logic is complex.
+2.  **4-Phase (Return-to-Zero):** Level sensitive ($Req \uparrow \dots Req \downarrow$). Slower (4 events/cycle), but logic is simpler.
+
+### Key Components
+* **Muller C-Element:** The "AND gate" for events.
+    * If inputs match ($A=B$), Output updates.
+    * If inputs differ, Output holds previous state.
+* **Dual-Rail Coding:** Uses 2 wires per bit (`00`=Null, `01`=Zero, `10`=One). Allows the data itself to signal "validity" (Completion Detection).
+
+---
+
+## 7. Signal Integrity & Power Delivery
+
+### Power Distribution Network (PDN)
+Must provide low impedance ($Z$) across all frequencies.
+* **Resonance:** Interaction between chip $C$ and package $L$ creates noise peaks.
+* **Decoupling Caps:** Local energy reservoirs placed at Chip, Package, and Board levels to flatten impedance.
+
+### The Eye Diagram
+Visual tool to analyze signal quality.
+* 
+
+[Image of Eye Diagram]
+
+* **Eye Opening (Height):** Noise Margin.
+* **Eye Width:** Timing Margin (Jitter).
+* **ISI (Inter-Symbol Interference):** Signal distortion from previous bits.
